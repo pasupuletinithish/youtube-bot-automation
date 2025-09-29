@@ -1,0 +1,22 @@
+# requirements.txt
+google-genai # For Gemini API
+pytrends      # For Google Trends
+requests      # For general web requests (like fetching the trend data)
+google-genai
+pytrends
+google-api-python-client  # The core YouTube API library
+google-auth-oauthlib      # For the authentication flow
+google-auth-httplib2      # For HTTP connections
+google-genai
+pytrends
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+gTTS        # For Google Text-to-Speech (free)
+moviepy     # For video editing and composition
+google-genai
+pytrends
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+requests          

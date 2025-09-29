@@ -1,0 +1,38 @@
+# .github/workflows/daily_video.yml
+name: Daily Video Automation
+
+on:
+  # This section schedules the workflow to run every day.
+  # CRON SYNTAX: 'minute hour day-of-month month day-of-week'
+  # This schedule runs every day at 10:00 AM UTC (adjust for your local time)
+  schedule:
+    - cron: '0 10 * * *' 
+  
+  # This allows you to run the workflow manually from the GitHub Actions tab
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest # A free virtual server to run the script
+    steps:
+      # 1. Checks out your repository code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Sets up the Python environment
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # 3. Installs the required libraries from requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # 4. Executes the main Python script
+      - name: Run Video Generation Script
+        run: python main.py
+        env:
+          # Passes your secret key to the Python script
+          # You must create a secret named GEMINI_API_KEY on GitHub!
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
