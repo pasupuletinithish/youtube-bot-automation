@@ -36,3 +36,8 @@ jobs:
           # Passes your secret key to the Python script
           # You must create a secret named GEMINI_API_KEY on GitHub!
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+           # Secret 2: YOUTUBE token (for authentication/upload)
+          YOUTUBE_REFRESH_TOKEN_FILE: ${{ secrets.YOUTUBE_REFRESH_TOKEN_FILE }}
+          
+          # Secret 3: Hugging Face token (for video generation)
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
