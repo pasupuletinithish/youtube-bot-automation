@@ -1,4 +1,6 @@
-# main.py
+# ==============================================================================
+# FINAL AUTOMATION PIPELINE: GEMINI PROMPT + AI VIDEO + YOUTUBE UPLOAD
+# ==============================================================================
 
 import os
 import json
@@ -7,7 +9,7 @@ import tempfile
 import time
 import random
 import requests
-import io # Added for potential future file handling if needed
+from requests.exceptions import RequestException # Specific request error handling
 
 from pytrends.request import TrendReq
 from google import genai
@@ -23,7 +25,7 @@ YOUTUBE_UPLOAD_SCOPE = ["https://www.googleapis.com/auth/youtube.upload"]
 GEMINI_MODEL = "gemini-2.5-flash"
 YOUTUBE_API_SERVICE_NAME = "youtube"
 YOUTUBE_API_VERSION = "v3"
-# Recommended T2V Model Endpoint - MUST be replaced with a live, free model URL
+# CRITICAL: REPLACE with your specific, live Hugging Face Inference Endpoint URL
 AI_VIDEO_API_URL = "https://api-inference.huggingface.co/models/tencent/HunyuanVideo" 
 
 
@@ -41,7 +43,7 @@ def get_authenticated_youtube_service():
         with open(TOKEN_FILE_PATH, 'r') as f:
             token_data = json.load(f)
         
-        # 3. Create Credentials object (The library handles refresh logic)
+        # 3. Create Credentials object 
         credentials = Credentials.from_authorized_user_info(
             info=token_data, 
             scopes=YOUTUBE_UPLOAD_SCOPE
@@ -80,7 +82,11 @@ def generate_dopamine_prompt(topic):
     """Uses Gemini to generate a creative, structured prompt for video AI."""
     
     try:
-        gemini_client = genai.Client(api_key=os.environ['GEMINI_API_KEY'])
+        # 1. Initialize client with timeout set in http_options (THE FIX)
+        gemini_client = genai.Client(
+            api_key=os.environ['GEMINI_API_KEY'],
+            http_options={'timeout': (10, 60)} # 10s connect, 60s read
+        )
     except KeyError:
         print("Error: GEMINI_API_KEY is not set.")
         return None
@@ -88,7 +94,7 @@ def generate_dopamine_prompt(topic):
     prompt = f"""
     You are a viral AI video generator specializing in satisfying, unrealistic content. 
     Convert this concept: '{topic}' into a single, hyper-descriptive, 8-second video prompt. 
-    The style must be hyper-realistic, cinematic, and focus on slow-motion, liquid, or slicing effects.
+    The style must be hyper-realistic, cinematic, and focused on slow-motion, liquid, or slicing effects.
 
     Format the output as a clean JSON object with the following keys:
     - "prompt": The hyper-detailed video generation prompt (max 250 chars).
@@ -99,12 +105,13 @@ def generate_dopamine_prompt(topic):
     
     print(f"Generating prompt for topic: {topic}")
     
+    # 2. Call generate_content (NO timeout argument here)
     response = gemini_client.models.generate_content(
         model=GEMINI_MODEL,
-        contents=prompt,
-        timeout=60 # Increased timeout to prevent Connection Reset error
+        contents=prompt
     )
     
+    # Safely parse the JSON response
     try:
         json_output = response.text.strip().replace('```json', '').replace('```', '')
         return json.loads(json_output)
@@ -138,14 +145,14 @@ def generate_ai_video(prompt_text):
     print(f"Sending prompt to AI Video API: {AI_VIDEO_API_URL}")
     
     try:
-        # Long timeout necessary for video generation
+        # 1. Send the request
         response = requests.post(AI_VIDEO_API_URL, headers=headers, json=payload, timeout=400) 
         response.raise_for_status() 
         
-        # The API returns the raw video bytes in the response content
+        # 2. The API returns the raw video bytes in the response content
         video_bytes = response.content
 
-        # Save to a temporary file for upload
+        # 3. Save to a temporary file for upload
         video_path = os.path.join(tempfile.gettempdir(), f"ai_video_{time.time()}.mp4")
         
         if len(video_bytes) < 1000:
@@ -177,7 +184,7 @@ def upload_video(youtube_service, file_path, title, description, tags):
             'title': title,
             'description': description,
             'tags': tags,
-            'categoryId': '22'
+            'categoryId': '22' # People & Blogs is a safe general category
         },
         'status': {
             'privacyStatus': 'unlisted' 
