@@ -1,6 +1,4 @@
-# ==============================================================================
-# FINAL AUTOMATION PIPELINE: GEMINI PROMPT + IMAGE GENERATION + YOUTUBE UPLOAD
-# ==============================================================================
+# main.py
 
 import os
 import json
@@ -15,7 +13,6 @@ from io import BytesIO
 # Image & Video Libraries
 from PIL import Image
 from moviepy.editor import ImageClip, AudioFileClip
-# NOTE: MoviePy is used to combine the static image and audio.
 
 # Google Libraries
 from pytrends.request import TrendReq
@@ -32,37 +29,38 @@ YOUTUBE_UPLOAD_SCOPE = ["https://www.googleapis.com/auth/youtube.upload"]
 GEMINI_MODEL = "gemini-2.5-flash"
 YOUTUBE_API_SERVICE_NAME = "youtube"
 YOUTUBE_API_VERSION = "v3"
-# CRITICAL: NEW URL set to a stable Text-to-Image model for successful API connection
+# CRITICAL: Replace with your chosen Inference API URL
 AI_VIDEO_API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0" 
-FALLBACK_FILE = "fallback_prompts.json"
 
 
-# --- AUTHENTICATION (Reads from the clean 'auth_token.json' file) ---
+# --- AUTHENTICATION (Reads simple string secrets) ---
 def get_authenticated_youtube_service():
-    """Reads the Refresh Token from the local file and builds the authenticated YouTube client."""
+    """Reads the Refresh Token and builds the authenticated YouTube client."""
     try:
-        # 1. Get the local file path from the environment variable set in the YAML file
-        TOKEN_FILE_PATH = os.environ.get('YOUTUBE_TOKEN_PATH')
-        
-        if not TOKEN_FILE_PATH or not os.path.exists(TOKEN_FILE_PATH):
-            raise FileNotFoundError(f"Authentication file ({TOKEN_FILE_PATH}) is missing.")
+        # 1. Read the simple string secrets from the environment
+        refresh_token = os.environ.get('YOUTUBE_REFRESH_TOKEN')
+        client_id = os.environ.get('CLIENT_ID')
+        client_secret = os.environ.get('CLIENT_SECRET')
+
+        if not refresh_token or not client_id or not client_secret:
+            raise EnvironmentError("One or more YouTube credentials (TOKEN, ID, SECRET) are missing.")
             
-        # 2. Load the JSON content from the clean local file
-        with open(TOKEN_FILE_PATH, 'r') as f:
-            token_data = json.load(f)
-        
-        # 3. Create Credentials object 
-        credentials = Credentials.from_authorized_user_info(
-            info=token_data, 
+        # 2. Directly create Credentials object using the simple string tokens
+        credentials = Credentials(
+            token=None,
+            refresh_token=refresh_token,
+            token_uri='https://oauth2.googleapis.com/token',
+            client_id=client_id,
+            client_secret=client_secret,
             scopes=YOUTUBE_UPLOAD_SCOPE
         )
 
-        # 4. If token is expired, refresh it (Crucial for automation!)
-        if credentials.expired and credentials.refresh_token:
-            print("Access token expired. Refreshing token...")
-            credentials.refresh(Request())
+        # 3. Refresh token immediately (The automation step)
+        if credentials.refresh_token:
+             print("Access token expired. Refreshing token...")
+             credentials.refresh(Request())
         
-        # 5. Build the YouTube service object
+        # 4. Build the YouTube service object
         return build(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, credentials=credentials)
 
     except Exception as e:
@@ -78,28 +76,21 @@ def get_trending_topic():
         top_trend = df.iloc[0, 0]
         return top_trend
     except Exception:
-        # Fallback topic if pytrends itself fails
         return "Unrealistic ASMR slicing" 
 
 def get_fallback_prompt():
-    """Reads a random prompt from the local JSON file when API fails."""
-    try:
-        # Tries to load the fallback file you created locally
-        with open(FALLBACK_FILE, 'r') as f:
-            prompts = json.load(f)
-        return random.choice(prompts)
-    except Exception as e:
-        # Hardcoded backup if the file itself is missing or corrupted
-        return {
-            "prompt": "Cinematic macro shot of a liquid diamond being sliced by a glowing knife, ultra detailed, 8K.",
-            "title": "Diamond Slice ✨ (Fallback)",
-            "description": "This is a safe fallback prompt used when the Gemini API times out.",
-            "tags": ["#fallback", "#AIArt", "#shorts", "#asmr", "#satisfying"]
-        }
+    """Returns a hardcoded safe prompt for immediate use."""
+    # This is now the ONLY fallback, guaranteeing structure.
+    return {
+        "prompt": "Cinematic macro shot of a liquid diamond being sliced by a glowing knife, ultra detailed, 8K.",
+        "title": "Diamond Slice ✨ (Fallback)",
+        "description": "This is a safe fallback prompt used when the Gemini API times out.",
+        "tags": ["#fallback", "#AIArt", "#shorts", "#asmr", "#satisfying"]
+    }
 
 
 def generate_dopamine_prompt(topic):
-    """Tries Gemini API, falls back to local file on timeout."""
+    """Tries Gemini API, falls back to hardcoded prompt on timeout."""
     
     try:
         # 1. Initialize client with a very high timeout (1000s)
@@ -108,7 +99,6 @@ def generate_dopamine_prompt(topic):
             http_options={'timeout': 1000} 
         )
     except KeyError:
-        print("Error: GEMINI_API_KEY is not set.")
         return get_fallback_prompt() 
     except Exception:
         return get_fallback_prompt() 
@@ -184,18 +174,14 @@ def generate_ai_video(prompt_text):
         # --- VIDEO CREATION WITH MOVIEPY & FFMPEG ---
         duration_seconds = 8
         
-        # 4. Create a silent audio track (MoviePy requires an audio source)
-        # NOTE: We use a placeholder audio path, but MoviePy can create silent clips.
-        silent_audio_path = os.path.join(tempfile.gettempdir(), "silent_audio.mp3")
+       # 4. Create the final video clip (combines image and silent audio)
+        duration_seconds = 8
         
-        # Create a silent audio clip (Requires manual creation if audio.mp3 doesn't exist)
-        # For simplicity, we create a very short silent audio clip
-        os.system(f"ffmpeg -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 -t {duration_seconds} -q:a 9 -acodec libmp3lame {silent_audio_path}")
-
+        # Create a silent audio clip directly using MoviePy and concatenate audio
+        silent_audio_clip = AudioFileClip("dummy_audio.mp3").set_duration(duration_seconds).volumex(0)
+        
         # 5. Combine Image and Silent Audio
         video_clip = ImageClip(image_path).set_duration(duration_seconds)
-        silent_audio_clip = AudioFileClip(silent_audio_path)
-        
         final_clip = video_clip.set_audio(silent_audio_clip)
 
         # 6. Export the final video (FPS set low for speed)
