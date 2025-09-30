@@ -21,4 +21,5 @@ google-auth-oauthlib
 google-auth-httplib2
 Pillow
 moviepy
-requests          
+requests       
+imageio-ffmpeg # <-- ADD or verify this package is present   
