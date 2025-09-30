@@ -92,13 +92,13 @@ def generate_dopamine_prompt(topic):
         return None
 
     prompt = f"""
-    You are a viral AI video generator specializing in satisfying, unrealistic content. 
-    Convert this concept: '{topic}' into a single, hyper-descriptive, 8-second video prompt. 
-    The style must be hyper-realistic, cinematic, and focused on slow-motion, liquid, or slicing effects.
+    You are a prompt engineer for a fast AI video generator. 
+    Your task is to take the concept: '{topic}' and convert it into the required JSON output.
+    DO NOT reason about the concept. Prioritize FAST, direct JSON output.
 
     Format the output as a clean JSON object with the following keys:
-    - "prompt": The hyper-detailed video generation prompt (max 250 chars).
-    - "title": A clickbait YouTube Shorts title (e.g., 'Forbidden Slice 🔪').
+    - "prompt": The hyper-detailed video generation prompt (max 200 chars).
+    - "title": A viral YouTube Shorts title (under 60 characters).
     - "description": A short, viral-style description with a call-to-action (max 3 lines).
     - "tags": A list of 5 relevant viral hashtags.
     """
