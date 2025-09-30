@@ -28,7 +28,7 @@ GEMINI_MODEL = "gemini-2.5-flash"
 YOUTUBE_API_SERVICE_NAME = "youtube"
 YOUTUBE_API_VERSION = "v3"
 # CRITICAL: Replace with your specific, live Hugging Face Inference Endpoint URL
-AI_VIDEO_API_URL = "https://api-inference.huggingface.co/models/tencent/HunyuanVideo" 
+AI_VIDEO_API_URL = "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5" 
 FALLBACK_FILE = "fallback_prompts.json"
 
 
