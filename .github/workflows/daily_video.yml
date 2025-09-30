@@ -35,8 +35,8 @@ jobs:
       - name: Create Auth File for Python
         id: create_auth_file
         run: |
-          # The command decodes the Base64 string from the secret and saves it as auth_token.json
-          echo "${{ secrets.YOUTUBE_REFRESH_TOKEN_FILE }}" | base64 --decode > auth_token.json
+          # Use printf for reliable output, xargs to trim whitespace, and base64 to decode.
+          printf "%s" "${{ secrets.YOUTUBE_REFRESH_TOKEN_FILE }}" | xargs | base64 --decode > auth_token.json
         shell: bash
         
       # 3. RUN MAIN SCRIPT (Injects all secrets as environment variables)
