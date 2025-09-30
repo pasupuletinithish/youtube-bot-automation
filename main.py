@@ -4,17 +4,10 @@ import os
 import json
 import sys
 import tempfile
-import time
 import random
 import requests
 from requests.exceptions import RequestException
-from io import BytesIO
-
-# Image & Video Libraries (All must be installed via requirements.txt)
-from PIL import Image
-import numpy 
-from moviepy.editor import ImageClip, AudioFileClip
-from moviepy.audio.AudioClip import AudioArrayClip 
+import shutil # For moving files after upload
 
 # Google Libraries
 from pytrends.request import TrendReq
@@ -31,14 +24,50 @@ YOUTUBE_UPLOAD_SCOPE = ["https://www.googleapis.com/auth/youtube.upload"]
 GEMINI_MODEL = "gemini-2.5-flash"
 YOUTUBE_API_SERVICE_NAME = "youtube"
 YOUTUBE_API_VERSION = "v3"
-# CRITICAL: Replace with your chosen Inference API URL
-AI_VIDEO_API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0" 
-FALLBACK_FILE = "fallback_prompts.json"
+
+# --- FOLDER SETUP ---
+# CRITICAL: These paths are relative to the repository root on the GitHub runner
+UPLOAD_QUEUE_DIR = "UPLOAD_QUEUE"
+PROCESSED_DIR = "PROCESSED"
 
 
-# --- AUTHENTICATION (Reads simple string secrets) ---
+# --- UTILITY: FILE MANAGEMENT ---
+def get_next_unprocessed_video():
+    """Finds the first MP4/MOV file in the queue."""
+    # Ensure directories exist (they should, but good for safety)
+    os.makedirs(UPLOAD_QUEUE_DIR, exist_ok=True)
+    os.makedirs(PROCESSED_DIR, exist_ok=True)
+
+    try:
+        # Get a list of files and sort them (to process oldest first)
+        all_files = sorted(os.listdir(UPLOAD_QUEUE_DIR))
+        
+        for filename in all_files:
+            if filename.lower().endswith(('.mp4', '.mov')):
+                full_path = os.path.join(UPLOAD_QUEUE_DIR, filename)
+                return full_path
+        
+        return None  # No unprocessed video found
+    except Exception as e:
+        print(f"Error accessing upload queue: {e}")
+        return None
+
+def mark_video_as_processed(video_path):
+    """Moves the video file from the queue to the processed folder."""
+    filename = os.path.basename(video_path)
+    new_path = os.path.join(PROCESSED_DIR, filename)
+    
+    try:
+        shutil.move(video_path, new_path)
+        print(f"Cleanup Success: Moved '{filename}' to PROCESSED folder.")
+    except Exception as e:
+        print(f"Cleanup FAILED: Could not move file: {e}")
+
+
+# --- AUTHENTICATION ---
+# (The code remains stable and uses the individual secrets passed via env)
 def get_authenticated_youtube_service():
-    """Reads the Refresh Token and builds the authenticated YouTube client."""
+    # ... (Authentication code omitted for brevity; assume it is the correct, final version) ...
     try:
         # 1. Read the simple string secrets from the environment
         refresh_token = os.environ.get('YOUTUBE_REFRESH_TOKEN')
@@ -46,9 +75,8 @@ def get_authenticated_youtube_service():
         client_secret = os.environ.get('CLIENT_SECRET')
 
         if not refresh_token or not client_id or not client_secret:
-            raise EnvironmentError("One or more YouTube credentials (TOKEN, ID, SECRET) are missing.")
+            raise EnvironmentError("One or more YouTube credentials are missing.")
             
-        # 2. Direct creation of Credentials object (bypass multi-line file error)
         credentials = Credentials(
             token=None,
             refresh_token=refresh_token,
@@ -58,161 +86,61 @@ def get_authenticated_youtube_service():
             scopes=YOUTUBE_UPLOAD_SCOPE
         )
 
-        # 3. Refresh token immediately (The automation step)
         if credentials.refresh_token:
              print("Access token expired. Refreshing token...")
              credentials.refresh(Request())
         
-        # 4. Build the YouTube service object
         return build(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, credentials=credentials)
 
     except Exception as e:
         print(f"Authentication failed: {type(e).__name__}: {e}")
         return None
 
-# --- PART 1: GEMINI PROMPT GENERATION (with Fallback) ---
-def get_trending_topic():
-    """Pulls a top trending topic from Google Trends for inspiration."""
-    try:
-        pytrends = TrendReq(hl='en-US', tz=360)
-        df = pytrends.trending_searches(pn='united_states')
-        top_trend = df.iloc[0, 0]
-        return top_trend
-    except Exception:
-        return "Unrealistic ASMR slicing" 
 
-def get_fallback_prompt():
-    """Returns a hardcoded safe prompt for immediate use."""
+# --- PART 1: GEMINI METADATA GENERATION ---
+# (Using a simplified prompt structure as the complex one caused 504 errors)
+def get_trending_topic():
+    # Fallback to avoid pytrends failure on cloud runners
+    return "ASMR Satisfying Video" 
+
+def get_fallback_metadata(topic):
+    """Returns a reliable metadata structure."""
     return {
-        "prompt": "Cinematic macro shot of a liquid diamond being sliced by a glowing knife, ultra detailed, 8K.",
-        "title": "Diamond Slice ✨ (Fallback)",
-        "description": "This is a safe fallback prompt used when the Gemini API times out.",
-        "tags": ["#fallback", "#AIArt", "#shorts", "#asmr", "#satisfying"]
+        "title": f"The Perfect Slice: {topic} [ASMR]",
+        "description": "Watch this strangely satisfying loop. Drop your video in the upload queue!",
+        "tags": ["#satisfying", "#ASMR", "#shorts", "#dopamine", "#unreal"]
     }
 
-
-def generate_dopamine_prompt(topic):
-    """Tries Gemini API, falls back to hardcoded prompt on timeout."""
-    
+def generate_metadata(topic):
+    """Tries Gemini API, falls back to hardcoded prompt on timeout/error."""
     try:
-        # 1. Initialize client with a very high timeout (1000s)
         gemini_client = genai.Client(
             api_key=os.environ['GEMINI_API_KEY'],
-            http_options={'timeout': 1000} 
+            http_options={'timeout': 120} 
         )
-    except KeyError:
-        return get_fallback_prompt() 
     except Exception:
-        return get_fallback_prompt() 
+        return get_fallback_metadata(topic) 
 
-    # The Prompt: Optimized for speed and directness
+    # Prompt optimization for stability and speed
     prompt = f"""
-    You are a prompt engineer for a fast AI image generator. 
-    Your task is to take the concept: '{topic}' and convert it into the required JSON output.
-    
-    CRITICAL: Keep the resulting prompt short and visually direct (MAX 15 words). 
-    DO NOT reason or add unnecessary text to the prompt or JSON.
-
-    Format the output as a clean JSON object with the following keys:
-    - "prompt": The single, high-impact visual prompt.
-    - "title": A viral YouTube Shorts title (MAX 60 characters).
-    - "description": A short, viral-style description with a call-to-action (max 3 lines).
-    - "tags": A list of 5 relevant viral hashtags.
+    Generate a viral title, description, and tags for a YouTube Short video about: "{topic}".
+    The style must be hyper-engaging and focused on the 'satisfying' trend.
+    Format the output as clean JSON with keys: "title", "description", and "tags".
     """
     
-    print(f"Generating prompt for topic: {topic}")
-    
     try:
-        # 2. Call generate_content 
-        response = gemini_client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt
-        )
-        
-        # 3. Return the live Gemini result if successful
+        response = gemini_client.models.generate_content(model=GEMINI_MODEL, contents=prompt)
         json_output = response.text.strip().replace('```json', '').replace('```', '')
         return json.loads(json_output)
         
-    except Exception as e:
-        # 4. FALLBACK: Catch the 504 error and return local prompt
-        print(f"\n⚠️ GEMINI API FAILED: {type(e).__name__}. Falling back to local prompt.")
-        return get_fallback_prompt()
+    except Exception:
+        return get_fallback_metadata(topic)
 
 
-# --- PART 2: FREE AI IMAGE GENERATION (The Video Workaround) ---
-def generate_ai_video(prompt_text):
-    """
-    Generates a static image from prompt, creates an 8-second silent MP4 
-    to satisfy YouTube's file requirements.
-    """
-    
-    HF_TOKEN = os.environ.get("HF_TOKEN")
-    if not HF_TOKEN:
-        print("HF_TOKEN secret is missing.")
-        return None
-
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-    
-    # Payload for Text-to-Image
-    payload = {"inputs": prompt_text, "options": {"wait_for_model": True}}
-
-    print(f"Sending prompt to AI Image API: {AI_VIDEO_API_URL}")
-    
-    try:
-        # 1. Send the request
-        response = requests.post(AI_VIDEO_API_URL, headers=headers, json=payload, timeout=120) 
-        response.raise_for_status() 
-        
-        # 2. Convert bytes to PIL Image object
-        image_bytes = response.content
-        image = Image.open(BytesIO(image_bytes))
-
-        # 3. Save the image and define file paths
-        image_path = os.path.join(tempfile.gettempdir(), f"ai_image_{time.time()}.jpg")
-        final_video_path = image_path.replace(".jpg", "_final.mp4")
-        
-        image.save(image_path)
-        
-        # --- VIDEO CREATION WITH MOVIEPY & FFMPEG ---
-        duration_seconds = 8
-        
-        # 4. FIX: Create Silent Audio Clip in memory (Pure Python, avoids system calls)
-        samplerate = 44100
-        n_samples = int(numpy.floor(samplerate * duration_seconds))
-        # Create a silent NumPy array (stereo)
-        audio_array = numpy.zeros((n_samples, 2)) 
-        
-        silent_audio_clip = AudioArrayClip(audio_array, fps=samplerate)
-        
-        # 5. Combine Image and Silent Audio
-        video_clip = ImageClip(image_path).set_duration(duration_seconds)
-        final_clip = video_clip.set_audio(silent_audio_clip)
-
-        # 6. Export the final video (FPS set low for speed)
-        print(f"Rendering final video ({duration_seconds} seconds)...")
-        final_clip.write_videofile(
-            final_video_path,
-            codec='libx264',
-            audio_codec='aac',
-            fps=1, 
-            verbose=False,
-            logger=None
-        )
-        
-        print(f"Video rendered successfully to: {final_video_path}")
-        return final_video_path
-    
-    except RequestException as e:
-        print(f"AI Image API Request Failed (Error {e.response.status_code if hasattr(e, 'response') else 'Unknown'}): {e}")
-        return None
-    except Exception as e:
-        print(f"Video Generation Failed: {e}.")
-        return None
-
-
-# --- PART 3: YOUTUBE UPLOAD ---
+# --- PART 2: YOUTUBE UPLOAD ---
 def upload_video(youtube_service, file_path, title, description, tags):
-    """Uploads the video file to YouTube."""
+    """Uploads the file to YouTube."""
+    # ... (Upload code omitted for brevity; assume it is the correct, final version) ...
     if youtube_service is None: return
 
     body = {
@@ -220,7 +148,7 @@ def upload_video(youtube_service, file_path, title, description, tags):
             'title': title,
             'description': description,
             'tags': tags,
-            'categoryId': '22' # People & Blogs is a safe general category
+            'categoryId': '22'
         },
         'status': {
             'privacyStatus': 'unlisted' 
@@ -229,7 +157,7 @@ def upload_video(youtube_service, file_path, title, description, tags):
     
     media_body = MediaFileUpload(file_path, chunksize=-1, resumable=True)
 
-    print(f"Attempting to upload video: {title}")
+    print(f"Attempting to upload file: {title}")
     
     insert_request = youtube_service.videos().insert(
         part=", ".join(body.keys()),
@@ -237,7 +165,6 @@ def upload_video(youtube_service, file_path, title, description, tags):
         media_body=media_body
     )
     
-    # Resumable upload loop
     response = None
     while response is None:
         status, response = insert_request.next_chunk()
@@ -256,27 +183,32 @@ if __name__ == "__main__":
     if youtube_client is None:
         sys.exit(1)
 
-    # 2. PROMPT GENERATION
-    dopamine_data = generate_dopamine_prompt(get_trending_topic())
+    # 2. FIND VIDEO FILE
+    final_video_path = get_next_unprocessed_video()
+    
+    if final_video_path is None:
+        print("✅ Automation Skip: No new videos found in UPLOAD_QUEUE. Exiting.")
+        sys.exit(0)
+
+    # 3. GENERATE METADATA
+    # The topic is based on the file name (e.g., if the file is 'emerald_slice.mp4', topic is 'emerald slice')
+    video_filename_base = os.path.basename(final_video_path)
+    video_topic = video_filename_base.replace(".mp4", "").replace(".mov", "").replace("_", " ")
+
+    dopamine_data = generate_metadata(video_topic)
     
     if dopamine_data is None:
         print("Failed to generate valid content data. Stopping.")
         sys.exit(1)
 
-    # 3. VIDEO GENERATION (Image Generation + Video File)
-    final_video_path = generate_ai_video(dopamine_data['prompt'])
-
     # 4. UPLOAD
-    if final_video_path and os.path.exists(final_video_path):
-        upload_video(
-            youtube_client,
-            final_video_path,
-            dopamine_data['title'],
-            dopamine_data['description'],
-            dopamine_data['tags']
-        )
-        # Clean up the temporary file after successful upload
-        os.remove(final_video_path) 
-    else:
-        print("Final video creation failed. Upload skipped.")
-        sys.exit(1)
+    upload_video(
+        youtube_client,
+        final_video_path,
+        dopamine_data['title'],
+        dopamine_data['description'],
+        dopamine_data['tags']
+    )
+    
+    # 5. CLEANUP
+    mark_video_as_processed(final_video_path)

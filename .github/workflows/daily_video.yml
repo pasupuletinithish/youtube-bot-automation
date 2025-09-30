@@ -1,10 +1,10 @@
 # .github/workflows/daily_video.yml
-name: Daily Video Automation
+name: Daily Video Uploader
 
 on:
-  # Runs every day at 10:00 AM UTC (adjust time to your preference)
   schedule:
-    - cron: '0 10 * * *' 
+    - cron: '0 10 * * *'  # First run: 10:00 AM UTC (Morning)
+    - cron: '0 22 * * *'  # Second run: 10:00 PM UTC (Evening/Night)
   
   # Allows manual triggering from the Actions tab
   workflow_dispatch:
@@ -16,41 +16,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. CRITICAL: Installs FFmpeg reliably without needing sudo
-      - name: Setup FFmpeg
-        uses: FedericoCarboni/setup-ffmpeg@v3
-        with:
-          ffmpeg-version: 'release' 
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
-      # 2. CRITICAL FIX: Base64 Decoding of the Refresh Token
-      # This step creates a clean local file with the token.
-      - name: Create Auth File for Python
-        id: create_auth_file
-        run: |
-          # Decodes the Base64 secret string and saves it as a clean file.
-          echo "${{ secrets.YOUTUBE_REFRESH_TOKEN_FILE }}" | base64 --decode > auth_token.json
-        shell: bash
+      - name: Install dependencies
+        run: pip install -r requirements.txt
         
-      # 3. FINAL FIX: Install Dependencies and Run Script in ONE SESSION
-      # This solves the ModuleNotFoundError by ensuring Python is configured immediately before running main.py.
-      - name: Install Dependencies and Run Script
-        run: |
-          echo "Installing Python dependencies..."
-          pip install -r requirements.txt
-          
-          echo "Running final automation script..."
-          python main.py
+      # CRITICAL: This injects all the individual string secrets
+      - name: Run Automation Pipeline
+        run: python main.py
         env:
-          # Passes the path to the newly created token file
-          YOUTUBE_TOKEN_PATH: auth_token.json
-          
-          # Passes the other required secrets
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} 
           HF_TOKEN: ${{ secrets.HF_TOKEN }} 
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
