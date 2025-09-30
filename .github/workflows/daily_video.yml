@@ -16,7 +16,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      
+      # 1. CRITICAL FIX: Installs FFmpeg reliably without needing sudo
+      # This action sets up the system-level FFmpeg binary required by MoviePy.
+      - name: Setup FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          ffmpeg-version: 'release' 
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -25,15 +30,26 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      # 2. CRITICAL FIX: Base64 Decoding of the Refresh Token
+      # This creates a clean local file with the token, bypassing string corruption errors.
+      - name: Create Auth File for Python
+        id: create_auth_file
+        run: |
+          # The secret contains the credentials packaged as JSON text.
+          # We decode it and save it as a file named auth_token.json.
+          echo "${{ secrets.YOUTUBE_REFRESH_TOKEN_FILE }}" | base64 --decode > auth_token.json
+        shell: bash
         
-      # --- RUN MAIN SCRIPT ---
-      # All required credentials are now passed as simple strings
+      # 3. RUN MAIN SCRIPT
       - name: Run Video Generation Script
         run: python main.py
         env:
+          # Passes the path to the newly created token file (used in main.py's auth function)
+          YOUTUBE_TOKEN_PATH: auth_token.json
+          
+          # Passes the other required secrets
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} 
           HF_TOKEN: ${{ secrets.HF_TOKEN }} 
-          # The three new, simple secrets needed for authentication
-          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}

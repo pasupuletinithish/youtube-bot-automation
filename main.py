@@ -1,4 +1,6 @@
-# main.py
+# ==============================================================================
+# FINAL AUTOMATION PIPELINE: GEMINI PROMPT + IMAGE GENERATION + YOUTUBE UPLOAD
+# ==============================================================================
 
 import os
 import json
@@ -10,9 +12,11 @@ import requests
 from requests.exceptions import RequestException
 from io import BytesIO
 
-# Image & Video Libraries
+# Image & Video Libraries (All must be installed via requirements.txt)
 from PIL import Image
+import numpy 
 from moviepy.editor import ImageClip, AudioFileClip
+from moviepy.audio.AudioClip import AudioArrayClip # <-- FIX: Import for array-based audio
 
 # Google Libraries
 from pytrends.request import TrendReq
@@ -31,6 +35,7 @@ YOUTUBE_API_SERVICE_NAME = "youtube"
 YOUTUBE_API_VERSION = "v3"
 # CRITICAL: Replace with your chosen Inference API URL
 AI_VIDEO_API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0" 
+FALLBACK_FILE = "fallback_prompts.json"
 
 
 # --- AUTHENTICATION (Reads simple string secrets) ---
@@ -45,7 +50,7 @@ def get_authenticated_youtube_service():
         if not refresh_token or not client_id or not client_secret:
             raise EnvironmentError("One or more YouTube credentials (TOKEN, ID, SECRET) are missing.")
             
-        # 2. Directly create Credentials object using the simple string tokens
+        # 2. Direct creation of Credentials object (bypass multi-line file error)
         credentials = Credentials(
             token=None,
             refresh_token=refresh_token,
@@ -80,7 +85,6 @@ def get_trending_topic():
 
 def get_fallback_prompt():
     """Returns a hardcoded safe prompt for immediate use."""
-    # This is now the ONLY fallback, guaranteeing structure.
     return {
         "prompt": "Cinematic macro shot of a liquid diamond being sliced by a glowing knife, ultra detailed, 8K.",
         "title": "Diamond Slice ✨ (Fallback)",
@@ -174,11 +178,13 @@ def generate_ai_video(prompt_text):
         # --- VIDEO CREATION WITH MOVIEPY & FFMPEG ---
         duration_seconds = 8
         
-       # 4. Create the final video clip (combines image and silent audio)
-        duration_seconds = 8
+        # 4. FIX: Create Silent Audio Clip (Pure Python, avoids os.system('ffmpeg'))
+        samplerate = 44100
+        n_samples = int(numpy.floor(samplerate * duration_seconds))
+        # Create a silent NumPy array (stereo)
+        audio_array = numpy.zeros((n_samples, 2)) 
         
-        # Create a silent audio clip directly using MoviePy and concatenate audio
-        silent_audio_clip = AudioFileClip("dummy_audio.mp3").set_duration(duration_seconds).volumex(0)
+        silent_audio_clip = AudioArrayClip(audio_array, fps=samplerate)
         
         # 5. Combine Image and Silent Audio
         video_clip = ImageClip(image_path).set_duration(duration_seconds)

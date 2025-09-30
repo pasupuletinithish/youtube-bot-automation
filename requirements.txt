@@ -22,4 +22,5 @@ google-auth-httplib2
 Pillow
 moviepy
 requests       
-imageio-ffmpeg # <-- ADD or verify this package is present   
+imageio-ffmpeg # <-- ADD or verify this package is present
+numpy  
