@@ -39,6 +39,10 @@ jobs:
         env:
           # Passes the path to the newly created token file
           YOUTUBE_TOKEN_PATH: auth_token.json
+          - name: Install FFmpeg for video processing
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
           
           # Passes the other required secrets
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} 

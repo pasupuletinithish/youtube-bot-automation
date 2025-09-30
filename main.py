@@ -10,10 +10,12 @@ import time
 import random
 import requests
 from requests.exceptions import RequestException
-
-# Image Handling Libraries
-from PIL import Image
 from io import BytesIO
+
+# Image & Video Libraries
+from PIL import Image
+from moviepy.editor import ImageClip, AudioFileClip
+# NOTE: MoviePy is used to combine the static image and audio.
 
 # Google Libraries
 from pytrends.request import TrendReq
@@ -90,8 +92,8 @@ def get_fallback_prompt():
         # Hardcoded backup if the file itself is missing or corrupted
         return {
             "prompt": "Cinematic macro shot of a liquid diamond being sliced by a glowing knife, ultra detailed, 8K.",
-            "title": "Forbidden Diamond Slice 💎",
-            "description": "This is a safe fallback prompt used when the main AI times out.",
+            "title": "Diamond Slice ✨ (Fallback)",
+            "description": "This is a safe fallback prompt used when the Gemini API times out.",
             "tags": ["#fallback", "#AIArt", "#shorts", "#asmr", "#satisfying"]
         }
 
@@ -148,8 +150,8 @@ def generate_dopamine_prompt(topic):
 # --- PART 2: FREE AI IMAGE GENERATION (The Video Workaround) ---
 def generate_ai_video(prompt_text):
     """
-    Generates a static image from prompt, saves it, and mocks a video file 
-    for the YouTube upload to succeed.
+    Generates a static image from prompt, creates an 8-second silent MP4 
+    to satisfy YouTube's file requirements.
     """
     
     HF_TOKEN = os.environ.get("HF_TOKEN")
@@ -159,7 +161,7 @@ def generate_ai_video(prompt_text):
 
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
     
-    # Payload for Text-to-Image Generation
+    # Payload for Text-to-Image
     payload = {"inputs": prompt_text, "options": {"wait_for_model": True}}
 
     print(f"Sending prompt to AI Image API: {AI_VIDEO_API_URL}")
@@ -167,34 +169,54 @@ def generate_ai_video(prompt_text):
     try:
         # 1. Send the request
         response = requests.post(AI_VIDEO_API_URL, headers=headers, json=payload, timeout=120) 
-        response.raise_for_status() # Raise an exception for 4xx or 5xx status codes
+        response.raise_for_status() 
         
         # 2. Convert bytes to PIL Image object
         image_bytes = response.content
         image = Image.open(BytesIO(image_bytes))
 
-        # 3. Save the image as a temporary JPEG file
+        # 3. Save the image and define file paths
         image_path = os.path.join(tempfile.gettempdir(), f"ai_image_{time.time()}.jpg")
-        image.save(image_path)
-        
-        # 4. MOCK VIDEO CREATION: Create a dummy MP4 file (YouTube requires a video extension)
-        # This is the temporary file the script will upload.
         final_video_path = image_path.replace(".jpg", "_final.mp4")
         
-        # NOTE: Since we cannot run FFmpeg on the runner easily, we create a small dummy file 
-        # to satisfy the MediaFileUpload check. The video itself will be corrupt, but the 
-        # upload pipeline logic will succeed.
-        with open(final_video_path, 'w') as f:
-             f.write("This is a dummy video file content to satisfy the upload requirement.")
+        image.save(image_path)
         
-        print(f"Image generated and DUMMY video file saved to: {final_video_path}")
+        # --- VIDEO CREATION WITH MOVIEPY & FFMPEG ---
+        duration_seconds = 8
+        
+        # 4. Create a silent audio track (MoviePy requires an audio source)
+        # NOTE: We use a placeholder audio path, but MoviePy can create silent clips.
+        silent_audio_path = os.path.join(tempfile.gettempdir(), "silent_audio.mp3")
+        
+        # Create a silent audio clip (Requires manual creation if audio.mp3 doesn't exist)
+        # For simplicity, we create a very short silent audio clip
+        os.system(f"ffmpeg -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 -t {duration_seconds} -q:a 9 -acodec libmp3lame {silent_audio_path}")
+
+        # 5. Combine Image and Silent Audio
+        video_clip = ImageClip(image_path).set_duration(duration_seconds)
+        silent_audio_clip = AudioFileClip(silent_audio_path)
+        
+        final_clip = video_clip.set_audio(silent_audio_clip)
+
+        # 6. Export the final video (FPS set low for speed)
+        print(f"Rendering final video ({duration_seconds} seconds)...")
+        final_clip.write_videofile(
+            final_video_path,
+            codec='libx264',
+            audio_codec='aac',
+            fps=1, 
+            verbose=False,
+            logger=None
+        )
+        
+        print(f"Video rendered successfully to: {final_video_path}")
         return final_video_path
     
     except RequestException as e:
-        print(f"AI Image API Request Failed (Error {response.status_code if 'response' in locals() else 'Unknown'}): {e}")
+        print(f"AI Image API Request Failed (Error {e.response.status_code if hasattr(e, 'response') else 'Unknown'}): {e}")
         return None
     except Exception as e:
-        print(f"Image Generation Failed: {e}.")
+        print(f"Video Generation Failed: {e}.")
         return None
 
 
@@ -245,14 +267,13 @@ if __name__ == "__main__":
         sys.exit(1)
 
     # 2. PROMPT GENERATION
-    # Uses local fallback on timeout
     dopamine_data = generate_dopamine_prompt(get_trending_topic())
     
     if dopamine_data is None:
         print("Failed to generate valid content data. Stopping.")
         sys.exit(1)
 
-    # 3. VIDEO GENERATION (Image Generation + Dummy Video File)
+    # 3. VIDEO GENERATION (Image Generation + Video File)
     final_video_path = generate_ai_video(dopamine_data['prompt'])
 
     # 4. UPLOAD
