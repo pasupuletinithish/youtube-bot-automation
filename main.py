@@ -85,7 +85,7 @@ def generate_dopamine_prompt(topic):
         # 1. Initialize client with timeout set in http_options (THE FIX)
         gemini_client = genai.Client(
             api_key=os.environ['GEMINI_API_KEY'],
-            http_options={'timeout': (10, 60)} # 10s connect, 60s read
+            http_options={'timeout': 70} # 10s connect, 60s read
         )
     except KeyError:
         print("Error: GEMINI_API_KEY is not set.")
@@ -244,3 +244,4 @@ if __name__ == "__main__":
     else:
         print("Final video creation failed. Upload skipped.")
         sys.exit(1)
+    
