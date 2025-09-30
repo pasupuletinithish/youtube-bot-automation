@@ -2,42 +2,43 @@
 name: Daily Video Automation
 
 on:
-  # This section schedules the workflow to run every day.
-  # CRON SYNTAX: 'minute hour day-of-month month day-of-week'
-  # This schedule runs every day at 10:00 AM UTC (adjust for your local time)
+  # Runs every day at 10:00 AM UTC (adjust time as needed)
   schedule:
     - cron: '0 10 * * *' 
   
-  # This allows you to run the workflow manually from the GitHub Actions tab
+  # Allows manual triggering from the Actions tab
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest # A free virtual server to run the script
+    runs-on: ubuntu-latest
     steps:
-      # 1. Checks out your repository code
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Sets up the Python environment
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
-      # 3. Installs the required libraries from requirements.txt
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # 4. Executes the main Python script
+      # --- CRITICAL: Writes the YouTube Secret JSON to a clean local file ---
+      - name: Create Auth File for Python
+        id: create_auth_file
+        run: |
+          # The single quote ensures the whole string (including newlines) is treated as one
+          echo '${{ secrets.YOUTUBE_REFRESH_TOKEN_FILE }}' > auth_token.json
+        shell: bash
+        
+      # --- RUN MAIN SCRIPT ---
       - name: Run Video Generation Script
         run: python main.py
         env:
-          # Passes your secret key to the Python script
-          # You must create a secret named GEMINI_API_KEY on GitHub!
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-           # Secret 2: YOUTUBE token (for authentication/upload)
-          YOUTUBE_REFRESH_TOKEN_FILE: ${{ secrets.YOUTUBE_REFRESH_TOKEN_FILE }}
+          # Passes the path to the newly created token file
+          YOUTUBE_TOKEN_PATH: auth_token.json
           
-          # Secret 3: Hugging Face token (for video generation)
+          # Passes the other required secrets
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} 
           HF_TOKEN: ${{ secrets.HF_TOKEN }}

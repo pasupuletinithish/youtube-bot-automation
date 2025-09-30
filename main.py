@@ -1,38 +1,64 @@
-# ==============================================================================
-# FULL AUTOMATION PIPELINE: GEMINI PROMPT + FREE AI VIDEO GENERATION + YOUTUBE UPLOAD
-# ==============================================================================
-# ==============================================================================
-# FULL AUTOMATION PIPELINE: GEMINI PROMPT + FREE AI VIDEO GENERATION + YOUTUBE UPLOAD
-# ==============================================================================
+# main.py
 
 import os
 import json
 import sys
 import tempfile
+import time
+import random
 import requests
-import time         # <-- ADDED for time.time() and potential delays
-import random       # <-- ADDED for random.choice()
-import io
-import httplib2 
-from google import genai
+
 from pytrends.request import TrendReq
+from google import genai
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
 
-# ... (The rest of your code remains the same) ...
 
-# --- CONFIGURATION (Ensure these are set in GitHub Secrets) ---
-# Secrets needed: GEMINI_API_KEY, YOUTUBE_REFRESH_TOKEN_FILE, HF_TOKEN
+# --- CONFIGURATION & CONSTANTS ---
 YOUTUBE_UPLOAD_SCOPE = ["https://www.googleapis.com/auth/youtube.upload"]
 GEMINI_MODEL = "gemini-2.5-flash"
 YOUTUBE_API_SERVICE_NAME = "youtube"
 YOUTUBE_API_VERSION = "v3"
+# Recommended T2V Model - REPLACE with a live Hugging Face Inference Endpoint URL
+AI_VIDEO_API_URL = "https://api-inference.huggingface.co/models/tencent/HunyuanVideo"
 
-# --- PART 1: GEMINI PROMPT GENERATION (The Brain) ---
 
+# --- AUTHENTICATION (Uses the local 'auth_token.json' file) ---
+def get_authenticated_youtube_service():
+    """Reads the Refresh Token from the local file and builds the authenticated YouTube client."""
+    try:
+        # 1. Get the local file path from the environment variable set in the YAML file
+        TOKEN_FILE_PATH = os.environ.get('YOUTUBE_TOKEN_PATH')
+        
+        if not TOKEN_FILE_PATH or not os.path.exists(TOKEN_FILE_PATH):
+            raise FileNotFoundError("Authentication file (auth_token.json) is missing on the runner.")
+            
+        # 2. Load the JSON content from the clean local file
+        with open(TOKEN_FILE_PATH, 'r') as f:
+            token_data = json.load(f)
+        
+        # 3. Create Credentials object (Google auth libraries handle the refresh logic automatically)
+        credentials = Credentials.from_authorized_user_info(
+            info=token_data, 
+            scopes=YOUTUBE_UPLOAD_SCOPE
+        )
+
+        # 4. If token is expired, refresh it (CRITICAL for automation)
+        if credentials.expired and credentials.refresh_token:
+            print("Access token expired. Refreshing token...")
+            credentials.refresh(Request())
+        
+        # 5. Build the YouTube service object
+        return build(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, credentials=credentials)
+
+    except Exception as e:
+        print(f"Authentication failed: {type(e).__name__}: {e}")
+        return None
+
+# --- PART 1: GEMINI PROMPT GENERATION ---
 def get_trending_topic():
     """Pulls a top trending topic from Google Trends for inspiration."""
     try:
@@ -41,11 +67,11 @@ def get_trending_topic():
         top_trend = df.iloc[0, 0]
         return top_trend
     except Exception:
-        # Fallback to a guaranteed high-dopamine topic
+        # Fallback to a high-dopamine topic
         fallback_topics = [
-            "Hyper-realistic macro ASMR slicing a liquid metal cube.",
+            "Hyper-realistic macro ASMR slicing a liquid diamond.",
             "Cinematic slow-motion of a crystal wave freezing in mid-air.",
-            "Cutting the moon like a birthday cake with a glowing laser knife."
+            "A volcano being eaten like ice cream, cinematic colors."
         ]
         return random.choice(fallback_topics)
 
@@ -60,14 +86,13 @@ def generate_dopamine_prompt(topic):
 
     # The Prompt: Guides the AI on style, theme, and format
     prompt = f"""
-    You are a viral AI video generator. Convert this concept: '{topic}' 
-    into a hyper-descriptive, highly satisfying, 8-second video prompt. 
-    The style must be hyper-realistic, cinematic, and focused on unrealistic physical phenomena 
-    (like slicing or melting).
+    You are a viral AI video generator specializing in satisfying, unrealistic content. 
+    Convert this concept: '{topic}' into a single, hyper-descriptive, 8-second video prompt. 
+    The style must be hyper-realistic, cinematic, and focus on slow-motion, liquid, or slicing effects.
 
     Format the output as a clean JSON object with the following keys:
     - "prompt": The hyper-detailed video generation prompt (max 250 chars).
-    - "title": A clickbait YouTube Shorts title (under 60 characters).
+    - "title": A clickbait YouTube Shorts title (e.g., 'Forbidden Slice 🔪').
     - "description": A short, viral-style description with a call-to-action (max 3 lines).
     - "tags": A list of 5 relevant viral hashtags.
     """
@@ -77,7 +102,6 @@ def generate_dopamine_prompt(topic):
         contents=prompt
     )
     
-    # Safely parse the JSON response
     try:
         json_output = response.text.strip().replace('```json', '').replace('```', '')
         return json.loads(json_output)
@@ -88,90 +112,62 @@ def generate_dopamine_prompt(topic):
 # --- PART 2: FREE AI VIDEO GENERATION (The Heavy Lifting) ---
 
 def generate_ai_video(prompt_text):
-    """
-    *** WARNING: THIS FUNCTION REQUIRES A LIVE, WORKING, FREE AI VIDEO API ENDPOINT ***
-    
-    - It is highly unstable, as free APIs come and go quickly.
-    - You MUST replace the API_URL with a current working free/open-source endpoint.
-    - This example uses the structure for the Hugging Face Inference API.
-    """
-    # Replace this URL with a current, working free Text-to-Video API endpoint!
-    API_URL = API_URL = "https://api-inference.huggingface.co/models/tencent/HunyuanVideo"
+    """Connects to the Hugging Face Inference API to generate and download a video."""
     
     HF_TOKEN = os.environ.get("HF_TOKEN")
     if not HF_TOKEN:
-        print("HF_TOKEN secret is missing. Cannot generate video.")
+        print("HF_TOKEN secret is missing.")
         return None
 
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
     
-    # Payload for a typical Text-to-Video model (adjust for your chosen API)
+    # Payload for a typical Text-to-Video model (adjust as needed)
     payload = {
-        "data": [
-            prompt_text,
-            8, # Video duration in seconds
-            "9:16", # Aspect ratio for Shorts
-            True, # Use random seed
-        ]
+        "inputs": prompt_text,
+        "parameters": {
+            "num_frames": 24 * 8, # 24 FPS * 8 seconds = 192 frames (for 8s video)
+            "guidance_scale": 9.0,
+            "height": 768,
+            "width": 512, # Portrait for shorts (adjust if model only supports square/landscape)
+            "video_length": 8, # Explicitly request 8 seconds
+        }
     }
 
-    print(f"Sending prompt to AI Video API: {API_URL}")
+    print(f"Sending prompt to AI Video API: {AI_VIDEO_API_URL}")
     
     try:
         # 1. Send the request
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=300) # 5-minute timeout
+        # NOTE: This is a long-running process, set a high timeout!
+        response = requests.post(AI_VIDEO_API_URL, headers=headers, json=payload, timeout=400) 
         response.raise_for_status() 
-        result = response.json()
+        
+        # 2. The API returns the raw video bytes
+        video_bytes = response.content
 
-        # 2. Extract the video URL from the response (ADJUST THIS LINE!)
-        # The structure depends on the API; this is a common placeholder
-        video_url = result['data'][0]['video_url'] 
-
-        # 3. Download the video content
-        video_response = requests.get(video_url, stream=True)
-        video_response.raise_for_status()
-
-        # 4. Save to a temporary file for upload
+        # 3. Save to a temporary file for upload
+        # We use a temp file to ensure the runner has a path to upload from
         video_path = os.path.join(tempfile.gettempdir(), f"ai_video_{time.time()}.mp4")
+        
+        if len(video_bytes) < 1000:
+            print("Error: AI Video API returned an empty or corrupt file.")
+            print(f"Raw response: {response.text[:200]}...")
+            return None
+        
         with open(video_path, 'wb') as f:
-            for chunk in video_response.iter_content(chunk_size=8192):
-                f.write(chunk)
+            f.write(video_bytes)
         
         print(f"Video downloaded successfully to: {video_path}")
         return video_path
     
     except requests.exceptions.RequestException as e:
-        print(f"AI Video API Request Failed: {e}")
+        print(f"AI Video API Request Failed (Check API_URL & Token): {e}")
         return None
     except Exception as e:
-        print(f"AI Video Generation/Download Failed: {e}. Check API response structure.")
+        print(f"Video Generation/Download Failed: {e}.")
         return None
 
 
-# --- PART 3: YOUTUBE UPLOAD ---
-
-def get_authenticated_youtube_service():
-    """Reads the Refresh Token and builds the authenticated YouTube client."""
-    try:
-        token_json_string = os.environ.get('YOUTUBE_REFRESH_TOKEN_FILE')
-        if not token_json_string:
-            raise EnvironmentError("YOUTUBE_REFRESH_TOKEN_FILE secret is missing.")
-            
-        token_data = json.loads(token_json_string)
-        
-        credentials = Credentials.from_authorized_user_info(
-            info=token_data, 
-            scopes=YOUTUBE_UPLOAD_SCOPE
-        )
-
-        if credentials.expired and credentials.refresh_token:
-            credentials.refresh(Request())
-        
-        return build(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, credentials=credentials)
-
-    except Exception as e:
-        print(f"Authentication failed: {e}")
-        return None
+# --- PART 4: YOUTUBE UPLOAD ---
 
 def upload_video(youtube_service, file_path, title, description, tags):
     """Uploads the video file to YouTube."""
@@ -182,10 +178,10 @@ def upload_video(youtube_service, file_path, title, description, tags):
             'title': title,
             'description': description,
             'tags': tags,
-            'categoryId': '22' # People & Blogs is a safe general category
+            'categoryId': '22'
         },
         'status': {
-            'privacyStatus': 'unlisted' # Recommended for initial testing
+            'privacyStatus': 'unlisted' 
         }
     }
     
@@ -237,7 +233,7 @@ if __name__ == "__main__":
             dopamine_data['description'],
             dopamine_data['tags']
         )
-        # Optional: Clean up the temporary file after successful upload
+        # Clean up the temporary file after successful upload
         os.remove(final_video_path) 
     else:
         print("Final video creation failed. Upload skipped.")
