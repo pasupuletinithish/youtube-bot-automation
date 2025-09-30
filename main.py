@@ -1,6 +1,4 @@
-# ==============================================================================
-# FINAL AUTOMATION PIPELINE: GEMINI PROMPT + IMAGE GENERATION + YOUTUBE UPLOAD
-# ==============================================================================
+# main.py
 
 import os
 import json
@@ -12,11 +10,11 @@ import requests
 from requests.exceptions import RequestException
 from io import BytesIO
 
-# Image & Video Libraries (All must be installed via requirements.txt)
+# Image & Video Libraries 
 from PIL import Image
 import numpy 
 from moviepy.editor import ImageClip, AudioFileClip
-from moviepy.audio.AudioClip import AudioArrayClip # <-- FIX: Import for array-based audio
+from moviepy.audio.AudioClip import AudioArrayClip 
 
 # Google Libraries
 from pytrends.request import TrendReq
@@ -178,7 +176,7 @@ def generate_ai_video(prompt_text):
         # --- VIDEO CREATION WITH MOVIEPY & FFMPEG ---
         duration_seconds = 8
         
-        # 4. FIX: Create Silent Audio Clip (Pure Python, avoids os.system('ffmpeg'))
+        # 4. FIX: Create Silent Audio Clip in memory (Pure Python, avoids os.system('ffmpeg'))
         samplerate = 44100
         n_samples = int(numpy.floor(samplerate * duration_seconds))
         # Create a silent NumPy array (stereo)
