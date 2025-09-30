@@ -1,5 +1,5 @@
 # ==============================================================================
-# FINAL AUTOMATION PIPELINE: GEMINI PROMPT + AI VIDEO + YOUTUBE UPLOAD
+# FINAL AUTOMATION PIPELINE: GEMINI PROMPT (w/ FALLBACK) + AI VIDEO + YOUTUBE UPLOAD
 # ==============================================================================
 
 import os
@@ -9,8 +9,10 @@ import tempfile
 import time
 import random
 import requests
-from requests.exceptions import RequestException # Specific request error handling
+import io 
+from requests.exceptions import RequestException
 
+# External Libraries
 from pytrends.request import TrendReq
 from google import genai
 from google.oauth2.credentials import Credentials
@@ -25,8 +27,9 @@ YOUTUBE_UPLOAD_SCOPE = ["https://www.googleapis.com/auth/youtube.upload"]
 GEMINI_MODEL = "gemini-2.5-flash"
 YOUTUBE_API_SERVICE_NAME = "youtube"
 YOUTUBE_API_VERSION = "v3"
-# CRITICAL: REPLACE with your specific, live Hugging Face Inference Endpoint URL
+# CRITICAL: Replace with your specific, live Hugging Face Inference Endpoint URL
 AI_VIDEO_API_URL = "https://api-inference.huggingface.co/models/tencent/HunyuanVideo" 
+FALLBACK_FILE = "fallback_prompts.json"
 
 
 # --- AUTHENTICATION (Reads from the clean 'auth_token.json' file) ---
@@ -61,7 +64,7 @@ def get_authenticated_youtube_service():
         print(f"Authentication failed: {type(e).__name__}: {e}")
         return None
 
-# --- PART 1: GEMINI PROMPT GENERATION ---
+# --- PART 1: GEMINI PROMPT GENERATION (with Fallback) ---
 def get_trending_topic():
     """Pulls a top trending topic from Google Trends for inspiration."""
     try:
@@ -70,55 +73,75 @@ def get_trending_topic():
         top_trend = df.iloc[0, 0]
         return top_trend
     except Exception:
-        # Fallback to a high-dopamine topic if pytrends fails
-        fallback_topics = [
-            "Hyper-realistic macro ASMR slicing a liquid diamond.",
-            "Cinematic slow-motion of a crystal wave freezing in mid-air.",
-            "A volcano being eaten like ice cream, cinematic colors."
-        ]
-        return random.choice(fallback_topics)
+        # Fallback topic if pytrends itself fails
+        return "Unrealistic ASMR slicing" 
+
+def get_fallback_prompt():
+    """Reads a random prompt from the local JSON file when API fails."""
+    try:
+        # Tries to load the fallback file you created locally
+        with open(FALLBACK_FILE, 'r') as f:
+            prompts = json.load(f)
+        return random.choice(prompts)
+    except Exception as e:
+        print(f"FATAL: Could not read fallback file. {e}. Using hardcoded safe prompt.")
+        # Hardcoded backup if the file itself is missing or corrupted
+        return {
+            "prompt": "Cinematic macro shot of a diamond dissolving into pure light. Slow-motion, 8K.",
+            "title": "Diamond Dissolve ✨ (Fallback)",
+            "description": "This is a safe fallback prompt used when the Gemini API times out.",
+            "tags": ["#fallback", "#AIArt", "#shorts", "#asmr", "#satisfying"]
+        }
+
 
 def generate_dopamine_prompt(topic):
-    """Uses Gemini to generate a creative, structured prompt for video AI."""
+    """Tries Gemini API, falls back to local file on timeout."""
     
     try:
-        # 1. Initialize client with timeout set in http_options (THE FIX)
+        # 1. Initialize client with a very high timeout (1000s)
         gemini_client = genai.Client(
             api_key=os.environ['GEMINI_API_KEY'],
-            http_options={'timeout': 1000} # 10s connect, 60s read
+            http_options={'timeout': 1000} 
         )
     except KeyError:
         print("Error: GEMINI_API_KEY is not set.")
-        return None
+        return get_fallback_prompt() # Fallback if key is missing
+    except Exception:
+        return get_fallback_prompt() # Fallback if client creation fails
 
+    # The Prompt: Guides the AI on style, theme, and format
     prompt = f"""
     You are a prompt engineer for a fast AI video generator. 
     Your task is to take the concept: '{topic}' and convert it into the required JSON output.
     
-    CRITICAL: Keep the resulting prompt short and visually direct. 
+    CRITICAL: Keep the resulting prompt short and visually direct (MAX 15 words). 
     DO NOT reason or add unnecessary text to the prompt or JSON.
 
     Format the output as a clean JSON object with the following keys:
-    - "prompt": A single, high-impact, short visual prompt (MAX 15 words).
+    - "prompt": The single, high-impact visual prompt.
     - "title": A viral YouTube Shorts title (MAX 60 characters).
-    - "tags": A list of 5 keywords.
+    - "description": A short, viral-style description with a call-to-action (max 3 lines).
+    - "tags": A list of 5 relevant viral hashtags.
     """
     
     print(f"Generating prompt for topic: {topic}")
     
-    # 2. Call generate_content (NO timeout argument here)
-    response = gemini_client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=prompt
-    )
-    
-    # Safely parse the JSON response
     try:
+        # 2. Call generate_content (This is the slow part that times out)
+        response = gemini_client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt
+        )
+        
+        # 3. Return the live Gemini result if successful
         json_output = response.text.strip().replace('```json', '').replace('```', '')
         return json.loads(json_output)
+        
     except Exception as e:
-        print(f"Error parsing Gemini JSON: {e}")
-        return None
+        # 4. FALLBACK: Catch the 504 error and return local prompt
+        print(f"\n⚠️ GEMINI API FAILED: {type(e).__name__}. Falling back to local prompt.")
+        return get_fallback_prompt()
+
 
 # --- PART 2: FREE AI VIDEO GENERATION ---
 def generate_ai_video(prompt_text):
@@ -146,14 +169,14 @@ def generate_ai_video(prompt_text):
     print(f"Sending prompt to AI Video API: {AI_VIDEO_API_URL}")
     
     try:
-        # 1. Send the request
+        # Long timeout necessary for video generation
         response = requests.post(AI_VIDEO_API_URL, headers=headers, json=payload, timeout=400) 
         response.raise_for_status() 
         
-        # 2. The API returns the raw video bytes in the response content
+        # The API returns the raw video bytes in the response content
         video_bytes = response.content
 
-        # 3. Save to a temporary file for upload
+        # Save to a temporary file for upload
         video_path = os.path.join(tempfile.gettempdir(), f"ai_video_{time.time()}.mp4")
         
         if len(video_bytes) < 1000:
@@ -221,7 +244,7 @@ if __name__ == "__main__":
     if youtube_client is None:
         sys.exit(1)
 
-    # 2. PROMPT GENERATION
+    # 2. PROMPT GENERATION (Uses fallback on timeout)
     dopamine_data = generate_dopamine_prompt(get_trending_topic())
     
     if dopamine_data is None:
@@ -245,4 +268,3 @@ if __name__ == "__main__":
     else:
         print("Final video creation failed. Upload skipped.")
         sys.exit(1)
-    
