@@ -1,6 +1,4 @@
-# ==============================================================================
-# FINAL AUTOMATION PIPELINE: GEMINI PROMPT (w/ FALLBACK) + AI VIDEO + YOUTUBE UPLOAD
-# ==============================================================================
+# main.py
 
 import os
 import json
@@ -9,10 +7,9 @@ import tempfile
 import time
 import random
 import requests
-import io 
 from requests.exceptions import RequestException
 
-# External Libraries
+# Libraries must be installed via requirements.txt
 from pytrends.request import TrendReq
 from google import genai
 from google.oauth2.credentials import Credentials
@@ -27,8 +24,8 @@ YOUTUBE_UPLOAD_SCOPE = ["https://www.googleapis.com/auth/youtube.upload"]
 GEMINI_MODEL = "gemini-2.5-flash"
 YOUTUBE_API_SERVICE_NAME = "youtube"
 YOUTUBE_API_VERSION = "v3"
-# CRITICAL: Replace with your specific, live Hugging Face Inference Endpoint URL
-AI_VIDEO_API_URL = "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5" 
+# CRITICAL: NEW T2V URL - Uses a popular, active T2V model for inference
+AI_VIDEO_API_URL = "https://api-inference.huggingface.co/models/cerspense/zeroscope_v2_576w" 
 FALLBACK_FILE = "fallback_prompts.json"
 
 
@@ -105,11 +102,11 @@ def generate_dopamine_prompt(topic):
         )
     except KeyError:
         print("Error: GEMINI_API_KEY is not set.")
-        return get_fallback_prompt() # Fallback if key is missing
+        return get_fallback_prompt() 
     except Exception:
-        return get_fallback_prompt() # Fallback if client creation fails
+        return get_fallback_prompt() 
 
-    # The Prompt: Guides the AI on style, theme, and format
+    # The Prompt: Optimized for speed and directness
     prompt = f"""
     You are a prompt engineer for a fast AI video generator. 
     Your task is to take the concept: '{topic}' and convert it into the required JSON output.
@@ -127,7 +124,7 @@ def generate_dopamine_prompt(topic):
     print(f"Generating prompt for topic: {topic}")
     
     try:
-        # 2. Call generate_content (This is the slow part that times out)
+        # 2. Call generate_content 
         response = gemini_client.models.generate_content(
             model=GEMINI_MODEL,
             contents=prompt
@@ -154,29 +151,29 @@ def generate_ai_video(prompt_text):
 
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
     
-    # Payload adjusted for a typical Hugging Face T2V model
+    # Payload modified for the zeroscope_v2_576w model structure
     payload = {
         "inputs": prompt_text,
         "parameters": {
-            "num_frames": 24 * 8, 
+            "num_frames": 240, # ~10 seconds at 24 FPS
             "guidance_scale": 9.0,
-            "height": 768,
-            "width": 512, 
-            "video_length": 8, 
+            "height": 320,
+            "width": 576, 
+            "fps": 10,
         }
     }
 
     print(f"Sending prompt to AI Video API: {AI_VIDEO_API_URL}")
     
     try:
-        # Long timeout necessary for video generation
+        # 1. Send the request
         response = requests.post(AI_VIDEO_API_URL, headers=headers, json=payload, timeout=400) 
         response.raise_for_status() 
         
-        # The API returns the raw video bytes in the response content
+        # 2. The API returns the raw video bytes in the response content
         video_bytes = response.content
 
-        # Save to a temporary file for upload
+        # 3. Save to a temporary file for upload
         video_path = os.path.join(tempfile.gettempdir(), f"ai_video_{time.time()}.mp4")
         
         if len(video_bytes) < 1000:
@@ -244,7 +241,7 @@ if __name__ == "__main__":
     if youtube_client is None:
         sys.exit(1)
 
-    # 2. PROMPT GENERATION (Uses fallback on timeout)
+    # 2. PROMPT GENERATION
     dopamine_data = generate_dopamine_prompt(get_trending_topic())
     
     if dopamine_data is None:
