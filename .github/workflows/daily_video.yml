@@ -2,11 +2,11 @@
 name: Daily Video Automation
 
 on:
-  # Runs every day at 10:00 AM UTC (adjust time as needed)
+  # Runs every day at 10:00 AM UTC (adjust time to your preference)
   schedule:
     - cron: '0 10 * * *' 
   
-  # Allows manual triggering from the Actions tab
+  # Allows manual triggering from the Actions tab (recommended for testing)
   workflow_dispatch:
 
 jobs:
@@ -16,6 +16,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 1. Install FFmpeg (Required for MoviePy to write video files)
+      - name: Install FFmpeg for video processing
+        # 'sudo' is needed to install system packages on the runner
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -24,25 +29,22 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # --- CRITICAL: Writes the YouTube Secret JSON to a clean local file ---
+      # 2. CRITICAL: DECODES THE YOUTUBE REFRESH TOKEN
+      # This fixes all JSON and corruption errors by decoding the Base64 secret 
+      # and saving it as a clean local file for Python to read.
       - name: Create Auth File for Python
         id: create_auth_file
         run: |
-          # The 'echo' command now pipes the secret through 'tr -d '\n\r'' (delete newlines)
-          # and 'sed' (strip leading/trailing whitespace).
-          # This ensures the output file 'auth_token.json' is a clean JSON string.
-          echo '${{ secrets.YOUTUBE_REFRESH_TOKEN_FILE }}' | tr -d '\n\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' > auth_token.json
+          # The command decodes the Base64 string from the secret and saves it as auth_token.json
+          echo "${{ secrets.YOUTUBE_REFRESH_TOKEN_FILE }}" | base64 --decode > auth_token.json
         shell: bash
-      # --- RUN MAIN SCRIPT ---
+        
+      # 3. RUN MAIN SCRIPT (Injects all secrets as environment variables)
       - name: Run Video Generation Script
         run: python main.py
         env:
           # Passes the path to the newly created token file
           YOUTUBE_TOKEN_PATH: auth_token.json
-          - name: Install FFmpeg for video processing
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
-      - name: Install dependencies
           
           # Passes the other required secrets
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} 
