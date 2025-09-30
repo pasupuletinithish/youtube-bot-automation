@@ -6,7 +6,7 @@ on:
   schedule:
     - cron: '0 10 * * *' 
   
-  # Allows manual triggering from the Actions tab (recommended for testing)
+  # Allows manual triggering from the Actions tab
   workflow_dispatch:
 
 jobs:
@@ -16,9 +16,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 1. Install FFmpeg (Required for MoviePy to write video files)
       - name: Install FFmpeg for video processing
-        # 'sudo' is needed to install system packages on the runner
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: Set up Python
@@ -28,24 +26,15 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
-
-      # 2. CRITICAL: DECODES THE YOUTUBE REFRESH TOKEN
-      # This fixes all JSON and corruption errors by decoding the Base64 secret 
-      # and saving it as a clean local file for Python to read.
-      - name: Create Auth File for Python
-        id: create_auth_file
-        run: |
-          # Use printf for reliable output, xargs to trim whitespace, and base64 to decode.
-          printf "%s" "${{ secrets.YOUTUBE_REFRESH_TOKEN_FILE }}" | xargs | base64 --decode > auth_token.json
-        shell: bash
         
-      # 3. RUN MAIN SCRIPT (Injects all secrets as environment variables)
+      # --- RUN MAIN SCRIPT ---
+      # All required credentials are now passed as simple strings
       - name: Run Video Generation Script
         run: python main.py
         env:
-          # Passes the path to the newly created token file
-          YOUTUBE_TOKEN_PATH: auth_token.json
-          
-          # Passes the other required secrets
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} 
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }} 
+          # The three new, simple secrets needed for authentication
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
